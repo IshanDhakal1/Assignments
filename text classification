@@ -1,0 +1,48 @@
+import tensorflow as tf
+import tensorflow_hub as hub
+import tensorflow_text as text
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import numpy as np
+from sklearn.metrics import confusion_matrix, classification_report
+
+df = pd.read_csv("HAM-SPAM.csv")
+df_spam = df[df['Category']=='spam']
+df_ham = df[df['Category']=='ham']
+df_ham_new = df_ham.sample(df_spam.shape[0])
+df_equal=pd.concat([df_ham_new,df_spam])
+df_equal['spam']=df_equal['Category'].apply(lambda x: 1 if x=='spam' else 0)
+X_train, X_test, y_train, y_test = train_test_split(df_equal['Message'],df_equal['spam'], stratify=df_equal['spam'])
+
+bert_preprocess = hub.KerasLayer("https://tfhub.dev/tensorflow/bert_en_uncased_preprocess/3")
+bert_encoder = hub.KerasLayer("https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/4")
+
+def get_sentence_embeding(sentences):
+    preprocessed_text = bert_preprocess(sentences)
+    return bert_encoder(preprocessed_text)['pooled_output']
+
+text_input = tf.keras.layers.Input(shape=(), dtype=tf.string, name='text')
+preprocessed_text = bert_preprocess(text_input)
+outputs = bert_encoder(preprocessed_text)
+
+l = tf.keras.layers.Dropout(0.1, name="dropout")(outputs['pooled_output'])
+l = tf.keras.layers.Dense(1, activation='sigmoid', name="output")(l)
+
+model = tf.keras.Model(inputs=[text_input], outputs = [l])
+
+METRICS = [tf.keras.metrics.BinaryAccuracy(name='accuracy'),tf.keras.metrics.Precision(name='precision'),tf.keras.metrics.Recall(name='recall')]
+
+model.compile(optimizer='adam',loss='binary_crossentropy',metrics=METRICS)
+model.fit(X_train, y_train, epochs=10)
+y_predicted = model.predict(X_test)
+y_predicted = y_predicted.flatten()
+y_predicted = np.where(y_predicted > 0.5, 1, 0)
+cm = confusion_matrix(y_test, y_predicted)
+print(classification_report(y_test, y_predicted))
+reviews = [
+    'Go until jurong point, crazy.. Available only in bugis n great world la e buffet... Cine there got amore wat...',
+    'Ok lar... Joking wif u oni...',
+    'URGENT! You have won a 1 week FREE membership in our £100,000 Prize Jackpot! Txt the word: CLAIM to No: 81010 T&C www.dbuk.net LCCLTD POBOX 4403LDNW1A7RW18',
+    'U dun say so early hor... U c already then say...'
+]
+model.predict(reviews)
